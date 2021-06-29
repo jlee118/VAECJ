@@ -4,12 +4,32 @@ from pm4py.objects.conversion.log import converter as log_converter
 import pandas as pd
 from datetime import datetime
 
-def mto_lstm_prep(journey):
+def many_to_one_prep(journey):
+    """
+    Setting up a many-to-one scheme.
+    Function Input is a complete journey.
+    Returns an RNN input of a history of activities, output is the following activity
+    """
     inp = [journey[:i] for i in range(1,len(journey))]
     out = journey[1:]
     return (inp,out)
 
-def make_data(id_indexes, arrays_df):
+def many_to_many_prep(journey):
+    """
+    Setting up a many-to-many scheme shifted by 1.  
+    Function input is a complete journey.
+    Returns an RNN input of a history of activities omitting the final activity, output is the same history shifted by 1 timeslot (omitting the first activity)
+    """
+    inp = journey[:-1]
+    out = journey[1:]
+    return(inp, out)
+
+def make_data(id_indexes, arrays_df, prep_method):
+    """
+    Creates training and testing sets for an RNN model.  
+    Function input are indices of a selected subset of data, a DataFrame consisting of aggregated list-like journey data, and a data preparation method.
+    Returns a tuple of training and testing data for journeys and inter-arrival times.
+    """
     X_j = []
     Y_j = []
     X_t = []
@@ -18,17 +38,20 @@ def make_data(id_indexes, arrays_df):
     selected = arrays_df[arrays_df["case:concept:name"].isin(id_indexes)]
 
     for index, row in selected.iterrows():
-        j_inp, j_out = mto_lstm_prep(row['concept:encoded'])
-        t_inp, t_out = mto_lstm_prep(row['time:interarrival_min'])
+        j_inp, j_out = prep_method(row['concept:encoded'])
+        t_inp, t_out = prep_method(row['time:interarrival_min'])
         X_j.extend(j_inp)
         X_t.extend(t_inp)
         Y_j.extend(j_out)
         Y_t.extend(t_out)
-    X_j = keras.preprocessing.sequence.pad_sequences(X_j, padding='pre')
-    X_t = keras.preprocessing.sequence.pad_sequences(X_t, padding='pre')
+    X_j = keras.preprocessing.sequence.pad_sequences(X_j, padding='pre', maxlen=60)
+    X_j = to_categorical(X_j)
+    X_t = keras.preprocessing.sequence.pad_sequences(X_t, padding='pre', maxlen=60)
     Y_j = np.asarray(Y_j).astype("float32")
+    Y_j = to_categorical(Y_j)
     Y_t = np.asarray(Y_t).astype("float32")
     return (X_j, X_t, Y_j, Y_t)
+
 
 if __name__ == '__main__':
 	# Array form of activities + interarrival times
