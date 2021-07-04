@@ -24,7 +24,7 @@ def many_to_many_prep(journey):
     out = journey[1:]
     return(inp, out)
 
-def make_data(id_indexes, arrays_df, prep_method):
+def many_to_many_make_data(id_indexes, arrays_df):
     """
     Creates training and testing sets for an RNN model.  
     Function input are indices of a selected subset of data, a DataFrame consisting of aggregated list-like journey data, and a data preparation method.
@@ -38,8 +38,36 @@ def make_data(id_indexes, arrays_df, prep_method):
     selected = arrays_df[arrays_df["case:concept:name"].isin(id_indexes)]
 
     for index, row in selected.iterrows():
-        j_inp, j_out = prep_method(row['concept:encoded'])
-        t_inp, t_out = prep_method(row['time:interarrival_min'])
+        j_inp, j_out = many_to_many_prep(row['concept:encoded'])
+        t_inp, t_out = many_to_many_prep(row['time:interarrival_min'])
+        X_j.append(j_inp)
+        X_t.append(t_inp)
+        Y_j.append(j_out)
+        Y_t.append(t_out)
+    X_j = keras.preprocessing.sequence.pad_sequences(X_j, padding='pre', maxlen=60)
+    X_j = to_categorical(X_j)
+    X_t = keras.preprocessing.sequence.pad_sequences(X_t, padding='pre', maxlen=60)
+    Y_j = keras.preprocessing.sequence.pad_sequences(Y_j, padding='pre', maxlen=60)
+    Y_j = to_categorical(Y_j)
+    Y_t = keras.preprocessing.sequence.pad_sequences(Y_t, padding='pre', maxlen=60)
+    return (X_j, X_t, Y_j, Y_t)
+
+def many_to_one_make_data(id_indexes, arrays_df):
+    """
+    Creates training and testing sets for an RNN model.  
+    Function input are indices of a selected subset of data, a DataFrame consisting of aggregated list-like journey data, and a data preparation method.
+    Returns a tuple of training and testing data for journeys and inter-arrival times.
+    """
+    X_j = []
+    Y_j = []
+    X_t = []
+    Y_t = []
+
+    selected = arrays_df[arrays_df["case:concept:name"].isin(id_indexes)]
+
+    for index, row in selected.iterrows():
+        j_inp, j_out = many_to_one_prep(row['concept:encoded'])
+        t_inp, t_out = many_to_one_prep(row['time:interarrival_min'])
         X_j.extend(j_inp)
         X_t.extend(t_inp)
         Y_j.extend(j_out)
