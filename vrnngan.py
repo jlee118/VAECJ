@@ -12,9 +12,10 @@ def kl_gauss(posterior_means, prior_means, posterior_log_var, prior_log_var):
 def wasserstein_loss(y_true, y_pred):
     return tf.reduce_mean(y_true * y_pred)
 
-# Implementing Variational RNN's and variations by subclassing Keras RNN-type Cells
+
 
 class VRNNCell(tf.keras.layers.GRUCell):
+    # Implementing Variational RNN's and variations by subclassing Keras RNN-type Cells
     def __init__(self, units, output_dim, **kwargs):
         super(VRNNCell, self).__init__(units, **kwargs)
         self.output_dim = output_dim
@@ -23,6 +24,8 @@ class VRNNCell(tf.keras.layers.GRUCell):
     def build(self, input_shape):
         # Taking most of the standard weight initiaalizations from the base GRU class
         super().build((input_shape[0], input_shape[1] + self.units))
+
+        self.batch_size = input_shape[0]
         
         self.input_kernel = self.add_weight(shape=(input_shape[-1], input_shape[-1]), name="layer", initializer='truncated_normal')
         
@@ -52,7 +55,7 @@ class VRNNCell(tf.keras.layers.GRUCell):
         z = tf.math.multiply(std, epsilon) + mu
         return z
     
-    def call(self, inputs, states, training=False):
+    def call(self, inputs, states=None, training=False, single_step=False):
         # Some formulations:
         # Generation:
         # z_t ~ N(mu_(0, t), sigma_(0,t)), w here [mu_(0,t), sigma(0,t)] = phi_prior(h_(t-1))
@@ -88,10 +91,11 @@ class VRNNCell(tf.keras.layers.GRUCell):
             return all_output, h_next
         
         else:
-           
             x_t = tf.nn.relu(tf.matmul(inputs, self.input_kernel))
-            h_prev = states[0]
-
+            if states is None:
+                h_prev = super().get_initial_state(x_t)
+            else:
+                h_prev = states[0]
             prior = tf.matmul(h_prev, self.prior_kernel)
             p_mu = tf.matmul(prior, self.prior_mu_kernel)
             p_logvar = tf.matmul(prior, self.prior_logvar_kernel)
@@ -115,13 +119,6 @@ class VRNNCell(tf.keras.layers.GRUCell):
    
     def get_config(self):
         return {"units":self.units}
-
-
-def kl_gauss(posterior_means, prior_means, posterior_log_var, prior_log_var):   
-    kl = prior_log_var - posterior_log_var + (tf.exp(posterior_log_var) + 
-                                       tf.square(posterior_means - prior_means)) / tf.exp(prior_log_var) - 1
-    kl = 0.5 * tf.reduce_sum(kl, axis=(1,2))
-    return kl
 
 class VRNNGRU(tf.keras.Model):
     def __init__(self, feature_space, latent_dim, timesteps, **kwargs):
@@ -209,25 +206,25 @@ class kCallback(tf.keras.callbacks.Callback):
 class VRNNGRUGAN(tf.keras.Model):
     def __init__(self, feature_space, latent_dim, timesteps, **kwargs):
         super(VRNNGRUGAN, self).__init__(**kwargs)
-        vrnn_cell = VRNNCell(latent_dim, feature_space)
+        self.vrnn_cell = VRNNCell(latent_dim, feature_space)
         self.feature_space = feature_space
         self.latent_dim = latent_dim
         
         vrnn_input = keras.layers.Input(shape=(timesteps, feature_space))
-        vrnn_output = keras.layers.RNN(vrnn_cell, return_sequences=True)(vrnn_input)
+        vrnn_output = keras.layers.RNN(self.vrnn_cell, return_sequences=True)(vrnn_input)
         self.vrnn = keras.Model(vrnn_input, vrnn_output)
                 
         disc_input = keras.layers.Input(shape=(timesteps, feature_space))
-        disc_rnn = keras.layers.GRU(2, recurrent_dropout=0.5, dropout=0.5)(disc_input)
-#         disc_rnn = keras.layers.Conv1D(filters=2, kernel_size=2, activation='relu')(disc_input)
-#         disc_rnn = keras.layers.MaxPooling1D(pool_size=2, strides=1, padding='same')(disc_rnn)
-#         disc_rnn = keras.layers.Flatten(name='feature_ext')(disc_rnn)
+        disc_rnn = keras.layers.GRU(16, recurrent_dropout=0.5, dropout=0.5, name='feature_ext')(disc_input)
+        # disc_rnn = keras.layers.Conv1D(filters=16, kernel_size=2, activation='relu')(disc_input)
+        # disc_rnn = keras.layers.MaxPooling1D(pool_size=8, strides=1, padding='same')(disc_rnn)
+        # disc_rnn = keras.layers.Flatten(name='feature_ext')(disc_rnn)
         disc_output = keras.layers.Dense(1, activation='sigmoid')(disc_rnn)
         disc_output = keras.layers.Dropout(0.4)(disc_output)
         disc_model = keras.Model(disc_input, disc_output)
         self.discrim = disc_model
         
-#         self.f = keras.Model(disc_input, self.discrim.get_layer('feature_ext').output)
+        # self.f = keras.Model(disc_input, self.discrim.get_layer('feature_ext').output)
         
         self.total_loss_tracker = keras.metrics.Mean(name="total_loss")
         self.reconstruction_loss_tracker = keras.metrics.Mean(
@@ -274,8 +271,6 @@ class VRNNGRUGAN(tf.keras.Model):
             discrim_fake_output = self.discrim(preds)
             discrim_real_output = self.discrim(output_data)
             
-            bce_logits = tf.keras.losses.BinaryCrossentropy(from_logits=True)
-
             discrim_output_loss_fake = tf.reduce_mean(
                 tf.keras.losses.binary_crossentropy(tf.zeros_like(discrim_fake_output), discrim_fake_output)
             )
@@ -297,8 +292,8 @@ class VRNNGRUGAN(tf.keras.Model):
             preds = outputs[0]
             discrim_fake_output = self.discrim(preds)
             
-#             real_embed = self.f(output_data)
-#             fake_embed = self.f(preds)
+            # real_embed = self.f(output_data)
+            # fake_embed = self.f(preds)
 
             q_mu = outputs[2]
             p_mu = outputs[3]
@@ -317,9 +312,9 @@ class VRNNGRUGAN(tf.keras.Model):
                 tf.keras.losses.binary_crossentropy(tf.ones_like(discrim_fake_output), discrim_fake_output) 
             )
             
-#             mislead_output_discrim_loss = tf.reduce_mean(
-#                 tf.keras.losses.mean_squared_error(real_embed, fake_embed)
-#             )
+            # mislead_output_discrim_loss = tf.reduce_mean(
+            #     tf.keras.losses.mean_squared_error(real_embed, fake_embed)
+            # )
             
             
             discrim_loss = tf.reduce_mean(
@@ -360,6 +355,24 @@ class VRNNGRUGAN(tf.keras.Model):
     def discrminator_score(self, inputs):
         score = self.discrim(inputs)
         return score
+
+    def rec_gen(self, data, length):
+        state=None 
+        generated = []
+        # seed state
+        for i in range(data.shape[0]):
+            reshaped_data = np.asarray([data[i]])
+            outputs, state = self.vrnn_cell(reshaped_data, states=state, training=False)
+        gen_data = outputs[0]
+        for i in range(length):
+            outputs, state = self.vrnn_cell(gen_data, states=state, training=False)
+            preds = outputs[0].numpy()
+            generated.append(preds)
+            gen_data = preds
+
+        return generated
+
+
     
     def test_step(self, data):
         inputs = data[0]
@@ -369,4 +382,6 @@ class VRNNGRUGAN(tf.keras.Model):
         return {
             "loss": recon_loss
         }
+
+
         
