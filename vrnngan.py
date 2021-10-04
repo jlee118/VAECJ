@@ -43,7 +43,9 @@ class VRNNCell(tf.keras.layers.GRUCell):
         
         self.z_kernel = self.add_weight(shape=(self.units, self.units), name="layer", initializer='truncated_normal')
         
-        self.output_kernel = self.add_weight(shape=(self.units + self.units, self.output_dim), name="layer", initializer='truncated_normal')
+        self.output_mean_kernel = self.add_weight(shape=(self.units + self.units, self.output_dim), name="layer", initializer='truncated_normal')
+
+        self.output_logvar_kernel =self.add_weight(shape=(self.units + self.units, self.output_dim), name="layer", initializer='truncated_normal')
 
 
     def sample(self, mu, log_var):
@@ -55,7 +57,7 @@ class VRNNCell(tf.keras.layers.GRUCell):
         z = tf.math.multiply(std, epsilon) + mu
         return z
     
-    def call(self, inputs, states=None, training=False, single_step=False):
+    def call(self, inputs, states=None, training=True):
         # Some formulations:
         # Generation:
         # z_t ~ N(mu_(0, t), sigma_(0,t)), w here [mu_(0,t), sigma(0,t)] = phi_prior(h_(t-1))
@@ -67,6 +69,7 @@ class VRNNCell(tf.keras.layers.GRUCell):
         # Let the base RNN cell handle the rest and add loss
         
         if training:
+            print("TRAINING")
             x_t = tf.nn.relu(tf.matmul(inputs, self.input_kernel))
             h_prev = states[0]
 
@@ -85,12 +88,17 @@ class VRNNCell(tf.keras.layers.GRUCell):
             inp = tf.concat([x_t, phi_z_t], axis=1)
             _, h_next = super().call(inp, h_prev)
             
-            output = tf.nn.relu(tf.matmul(tf.concat([h_prev, phi_z_t], axis=1), self.output_kernel))
+            output_mean = tf.matmul(tf.concat([h_prev, phi_z_t], axis=1), self.output_mean_kernel)
+            output_log_var = tf.matmul(tf.concat([h_prev, phi_z_t], axis=1), self.output_logvar_kernel)
+
+            output = self.sample(output_mean, output_log_var)
+
             
-            all_output = (output, z_t, q_mu, p_mu, q_logvar, p_logvar)
+            all_output = (output, z_t, q_mu, p_mu, q_logvar, p_logvar, output_mean, output_log_var)
             return all_output, h_next
         
         else:
+            print('GENERATION')
             x_t = tf.nn.relu(tf.matmul(inputs, self.input_kernel))
             if states is None:
                 h_prev = super().get_initial_state(x_t)
@@ -111,9 +119,12 @@ class VRNNCell(tf.keras.layers.GRUCell):
             inp = tf.concat([x_t, phi_z_t], axis=1)
             _, h_next = super().call(inp, h_prev)
             
-            output = tf.nn.relu(tf.matmul(tf.concat([h_prev, phi_z_t], axis=1), self.output_kernel))
+            output_mean = tf.matmul(tf.concat([h_prev, phi_z_t], axis=1), self.output_mean_kernel)
+            output_log_var = tf.matmul(tf.concat([h_prev, phi_z_t], axis=1), self.output_logvar_kernel)
+
+            output = self.sample(output_mean, output_log_var)
             
-            all_output = (output, z_t, q_mu, p_mu, q_logvar, p_logvar)
+            all_output = (output, z_t, q_mu, p_mu, q_logvar, p_logvar, output_mean, output_log_var)
             return all_output, h_next
     
    
@@ -261,7 +272,7 @@ class VRNNGRUGAN(tf.keras.Model):
             output_data = data[1]
             
         with tf.GradientTape(persistent=True) as tape:
-            outputs = self.vrnn(input_data, training=True)
+            outputs = self.vrnn(input_data)
             preds = outputs[0]
             
 #             cut_preds = tf.slice(preds, [0,19,0], [-1,-1,-1])
@@ -288,7 +299,7 @@ class VRNNGRUGAN(tf.keras.Model):
         del tape
         
         with tf.GradientTape(persistent=True) as tape:
-            outputs = self.vrnn(input_data, training=True)
+            outputs = self.vrnn(input_data)
             preds = outputs[0]
             discrim_fake_output = self.discrim(preds)
             
@@ -345,11 +356,12 @@ class VRNNGRUGAN(tf.keras.Model):
         }
 
     def call(self, inputs):
-        outputs = self.vrnn(inputs, training=True)
+        outputs = self.vrnn(inputs)
         return outputs
     
+
     def generate(self, inputs):
-        outputs = self.vrnn(inputs, training=False)
+        outputs = self.vrnn(inputs, training=True)
         return outputs
     
     def discrminator_score(self, inputs):
@@ -361,11 +373,13 @@ class VRNNGRUGAN(tf.keras.Model):
         generated = []
         # seed state
         for i in range(data.shape[0]):
-            reshaped_data = np.asarray([data[i]])
+            reshaped_data = np.asarray([[data[i]]])
             outputs, state = self.vrnn_cell(reshaped_data, states=state, training=False)
+            state = [state]
         gen_data = outputs[0]
         for i in range(length):
             outputs, state = self.vrnn_cell(gen_data, states=state, training=False)
+            state = [state]
             preds = outputs[0].numpy()
             generated.append(preds)
             gen_data = preds
