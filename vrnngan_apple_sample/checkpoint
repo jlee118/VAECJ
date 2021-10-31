@@ -1,0 +1,2 @@
+model_checkpoint_path: "vrnngan_apple_sample"
+all_model_checkpoint_paths: "vrnngan_apple_sample"

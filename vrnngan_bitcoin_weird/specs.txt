@@ -1,0 +1,5 @@
+Encoder Adam alpha = 0.00001
+Generator Adam alpha = 0.000001
+
+latent_dim = 128
+Generator dim = 16

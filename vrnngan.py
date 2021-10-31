@@ -69,7 +69,6 @@ class VRNNCell(tf.keras.layers.GRUCell):
         # Let the base RNN cell handle the rest and add loss
         
         if training:
-            print("TRAINING")
             x_t = tf.nn.relu(tf.matmul(inputs, self.input_kernel))
             h_prev = states[0]
 
@@ -226,7 +225,7 @@ class VRNNGRUGAN(tf.keras.Model):
         self.vrnn = keras.Model(vrnn_input, vrnn_output)
                 
         disc_input = keras.layers.Input(shape=(timesteps, feature_space))
-        disc_rnn = keras.layers.GRU(16, recurrent_dropout=0.5, dropout=0.5, name='feature_ext')(disc_input)
+        disc_rnn = keras.layers.GRU(8, recurrent_dropout=0.5, dropout=0.5, name='feature_ext')(disc_input)
         # disc_rnn = keras.layers.Conv1D(filters=16, kernel_size=2, activation='relu')(disc_input)
         # disc_rnn = keras.layers.MaxPooling1D(pool_size=8, strides=1, padding='same')(disc_rnn)
         # disc_rnn = keras.layers.Flatten(name='feature_ext')(disc_rnn)
@@ -373,10 +372,11 @@ class VRNNGRUGAN(tf.keras.Model):
         generated = []
         # seed state
         for i in range(data.shape[0]):
-            reshaped_data = np.asarray([[data[i]]])
+            reshaped_data = np.asarray([data[i]])
             outputs, state = self.vrnn_cell(reshaped_data, states=state, training=False)
             state = [state]
         gen_data = outputs[0]
+
         for i in range(length):
             outputs, state = self.vrnn_cell(gen_data, states=state, training=False)
             state = [state]
