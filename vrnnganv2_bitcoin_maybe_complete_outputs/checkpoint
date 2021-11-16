@@ -1,0 +1,2 @@
+model_checkpoint_path: "vrnnganv2_bitcoin_maybe_complete_outputs"
+all_model_checkpoint_paths: "vrnnganv2_bitcoin_maybe_complete_outputs"

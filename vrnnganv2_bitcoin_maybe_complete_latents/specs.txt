@@ -1,0 +1,22 @@
+timesteps = X_train.shape[1]
+feature_space = X_train.shape[2]
+latent_dim = 16
+z_dim = 16
+model = VRNNGRUGAN(feature_space, z_dim, latent_dim, timesteps, 0.4)
+model.compile(keras.optimizers.Adam(lr=0.0001), keras.optimizers.Adam(lr=0.03))
+model.fit(X_train, X_train, batch_size= 16, epochs=100)
+
+FEATURES:
+- WGAN LOSS
+- NLL LOSS
+- EVERYTHING USES STD INSTEAD OF LOGVAR
+- LATENT DISCRIMINATOR
+ disc_rnn = keras.layers.Bidirectional(keras.layers.GRU(8, recurrent_dropout=0.5, dropout=0.5), merge_mode='sum', name='feature_ext')(disc_input)
+
+NOTES:
+- lowest KL divergence ever seen, seems to converge nicely when it does
+- widely varying samples, quite alive looking
+- large standard deviations learned, perhaps a non-latent discriminator may solve this problem better?
+- switching to use std instead of logvar seems to have done the trick....learns quite nicely
+- forces the prior to match the posterior quickly
+- only problem really is that it can still produce negative values...

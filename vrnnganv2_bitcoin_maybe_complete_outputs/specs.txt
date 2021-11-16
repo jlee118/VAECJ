@@ -1,0 +1,27 @@
+timesteps = X_train.shape[1]
+feature_space = X_train.shape[2]
+latent_dim = 16
+z_dim = 16
+model = VRNNGRUGAN(feature_space, z_dim, latent_dim, timesteps, 0.4)
+model.compile(keras.optimizers.Adam(lr=0.0001), keras.optimizers.Adam(lr=0.03))
+model.fit(X_train, X_train, batch_size= 16, epochs=100)
+
+current epochs = 400
+
+FEATURES:
+- WGAN LOSS
+- NLL LOSS
+- EVERYTHING USES STD INSTEAD OF LOGVAR
+- OUTPUTS DISCRIMINATOR
+ disc_rnn = keras.layers.Bidirectional(keras.layers.GRU(8, recurrent_dropout=0.5, dropout=0.5), merge_mode='sum', name='feature_ext')(disc_input)
+
+NOTES:
+- also converges fast when working
+- non-latent discriminator seems to generate data that is less varying, more realstic?
+- some std is very large and some very small, it seems that when the std is low, the data produced is of low value
+- need more epochs?
+
+UPDATES:
+- as training goes on, it seems that the mean gets clcoser to the real values even if they don't say
+- KL divergence keeps decreasing, the output NLL may increase a little bit, trying to see if generations
+get more realistic as time goes on
