@@ -1,0 +1,43 @@
+VRNN
+
+timesteps = train.shape[1]
+feature_space = train.shape[2]
+z_dim = 32
+hidden_dim = 64
+vrnn = VRNNGRU(feature_space, z_dim, hidden_dim, timesteps)
+vrnn.compile(keras.optimizers.Adam(lr=0.001))
+vrnn.fit(train, train, batch_size= 20, epochs=10)
+
+GAN
+
+timesteps = train.shape[1]
+feature_space = train.shape[2]
+z_dim = 32
+hidden_dim = 64
+model = VRNNGRUGAN(feature_space, z_dim, hidden_dim, timesteps, 20.0, vrnn)
+model.compile(keras.optimizers.Adam(lr=0.001), keras.optimizers.Adam(lr=0.001))
+model.fit(train, train, batch_size= 20, epochs=500)  
+
+Discriminator
+
+		disc_input = keras.layers.Input(shape=(timesteps, self.feature_space))
+		# disc_rnn = keras.layers.Bidirectional(keras.layers.GRU(16, recurrent_dropout=0.5, dropout=0.5), merge_mode='ave', name='feature_ext')(disc_input)
+
+		disc_rnn = tfa.layers.SpectralNormalization(keras.layers.Conv1D(filters=8, kernel_size=3, activation='relu'))(disc_input)
+		disc_rnn = tf.keras.layers.LeakyReLU(0.2)(disc_rnn)
+		disc_rnn = tf.keras.layers.Dropout(0.5)(disc_rnn)
+		disc_rnn = keras.layers.MaxPooling1D(pool_size=2, strides=1, padding='same')(disc_rnn)
+		disc_rnn = keras.layers.Dense(16)(disc_rnn)
+		disc_rnn = keras.layers.LeakyReLU(0.2)(disc_rnn)
+		disc_output = keras.layers.Dense(1)(disc_rnn)
+		disc_model = keras.Model(disc_input, disc_output)
+		self.discrim = disc_model
+
+- This is probably the one that has worked best so far
+- on ARMA(1,1) data
+- seems like estimated coefficients are close 1.0 for both
+- main takeaway....Dropout worked REALLY WELL
+- has stopped discriminator from discontinuing to learn
+- started off in this cycle of peaks and troughs, starting to show more variation both in range
+and in behaviour while maintaining ARMA(1,1) coefficients
+- trained for about 650 epochs
