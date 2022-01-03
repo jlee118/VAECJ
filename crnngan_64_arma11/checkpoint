@@ -1,0 +1,2 @@
+model_checkpoint_path: "crnngan_64_gan"
+all_model_checkpoint_paths: "crnngan_64_gan"
