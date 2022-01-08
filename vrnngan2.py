@@ -115,8 +115,7 @@ class VRNNCell(tf.keras.layers.GRUCell):
 			output = tf.nn.leaky_relu(tf.matmul((tf.concat([h_prev, phi_z_t], axis=1)), self.output_kernel))
 			output = tf.nn.leaky_relu(tf.matmul(output, self.output_kernel2))
 
-			
-			output_mean = tf.matmul(output, self.output_mean_kernel)
+			output_mean = tf.nn.sigmoid(tf.matmul(output, self.output_mean_kernel))
 			output_std = tf.nn.softplus(tf.matmul(output, self.output_logvar_kernel))
 
 			o = self.sample(output_mean, output_std)
@@ -134,8 +133,6 @@ class VRNNCell(tf.keras.layers.GRUCell):
 				h_prev = states[0]
 
 			prior = tf.nn.leaky_relu(tf.matmul(h_prev, self.prior_kernel))
-			# prior = tf.nn.leaky_relu(tf.matmul(prior, self.prior_kernel2))
-
 			p_mu = tf.matmul(prior, self.prior_mu_kernel)
 			p_std = tf.nn.softplus(tf.matmul(prior, self.prior_logvar_kernel))
 			
@@ -153,7 +150,8 @@ class VRNNCell(tf.keras.layers.GRUCell):
 			output = tf.nn.leaky_relu(tf.matmul((tf.concat([h_prev, phi_z_t], axis=1)), self.output_kernel))
 			output = tf.nn.leaky_relu(tf.matmul(output, self.output_kernel2))
 
-			output_mean = tf.matmul(output, self.output_mean_kernel)
+
+			output_mean = tf.nn.sigmoid(tf.matmul(output, self.output_mean_kernel))
 			output_std = tf.nn.softplus(tf.matmul(output, self.output_logvar_kernel))
 
 			o = self.sample(output_mean, output_std)
@@ -277,14 +275,24 @@ class VRNNGRUGAN(tf.keras.Model):
 		self.vrnn = vrnn_model
 				
 		disc_input = keras.layers.Input(shape=(timesteps, self.feature_space))
-		# disc_rnn = keras.layers.Bidirectional(keras.layers.GRU(16, recurrent_dropout=0.5, dropout=0.5), merge_mode='ave', name='feature_ext')(disc_input)
+		# disc_rnn = keras.layers.Bidirectional(keras.layers.GRU(32, return_sequences=True, recurrent_dropout=0.5, dropout=0.5, activity_regularizer='l2'), merge_mode='ave')(disc_input)
+		# # disc_rnn = keras.layers.Bidirectional(keras.layers.GRU(32, recurrent_dropout=0.5, dropout=0.5), merge_mode='sum')(disc_input)
 
-		disc_rnn = tfa.layers.SpectralNormalization(keras.layers.Conv1D(filters=8, kernel_size=3, activation='relu'))(disc_input)
+
+		disc_rnn = tfa.layers.SpectralNormalization(keras.layers.Conv1D(filters=16, kernel_size=3, activation='relu'))(disc_input)
 		disc_rnn = tf.keras.layers.LeakyReLU(0.2)(disc_rnn)
 		disc_rnn = tf.keras.layers.Dropout(0.5)(disc_rnn)
-		disc_rnn = keras.layers.MaxPooling1D(pool_size=2, strides=1, padding='same')(disc_rnn)
+
+		disc_rnn = tfa.layers.SpectralNormalization(keras.layers.Conv1D(filters=16, kernel_size=3, activation='relu'))(disc_input)
+		disc_rnn = tf.keras.layers.LeakyReLU(0.2)(disc_rnn)
+		disc_rnn = tf.keras.layers.Dropout(0.5)(disc_rnn)		
+
+		# disc_rnn = keras.layers.MaxPooling1D(pool_size=1, strides=2, padding='same')(disc_rnn)
 		disc_rnn = keras.layers.Dense(16)(disc_rnn)
+		disc_rnn = tf.keras.layers.Dropout(0.3)(disc_rnn)
+
 		disc_rnn = keras.layers.LeakyReLU(0.2, name="feature_ext")(disc_rnn)
+
 		disc_output = keras.layers.Dense(1)(disc_rnn)
 		disc_model = keras.Model(disc_input, disc_output)
 		self.discrim = disc_model
@@ -325,22 +333,29 @@ class VRNNGRUGAN(tf.keras.Model):
 			inputs = input_data[:,0,:]
 			state = None
 			gen = []
-			for i in range(100):
+			for i in range(97):
 				# outputs and states should be batch_size, feature_size
 				sample, state = self.vrnn.vrnn_cell(inputs, state, inference=False)
-				gen.append(sample[0])
+				gen.append(sample[6])
 				inputs = sample[0] 
 				state = [state]
 			gen = tf.stack(gen, axis=1)
 
+			outputs = self.vrnn(input_data)[6]
+
 			discrim_fake_output = self.discrim(gen)
-			discrim_real_output = self.discrim(output_data)
+			discrim_fake_output2 = self.discrim(outputs)
+			discrim_real_output = self.discrim(outputs)
 
 
 			bce = tf.keras.losses.BinaryCrossentropy(label_smoothing = 0.1, from_logits=True)
 			
 			discrim_output_loss_fake = tf.reduce_mean(
 				bce(tf.zeros_like(discrim_fake_output), discrim_fake_output)
+			)
+
+			discrim_output_loss_fake2 = tf.reduce_mean(
+				bce(tf.zeros_like(discrim_fake_output2), discrim_fake_output2)
 			)
 
 			# discrim_output_loss_fake = tf.reduce_mean(
@@ -355,7 +370,7 @@ class VRNNGRUGAN(tf.keras.Model):
 			#     discrim_real_output
 			# )
 
-			discrim_loss = discrim_output_loss_fake + discrim_output_loss_real
+			discrim_loss = discrim_output_loss_fake + discrim_output_loss_real + discrim_output_loss_fake2
 		discrim_grads = tape.gradient(discrim_loss, self.discrim.trainable_weights)
 		# discrim_grads,_ = tf.clip_by_global_norm(discrim_grads)
 		self.discrim_optimizer.apply_gradients(zip(discrim_grads, self.discrim.trainable_weights))
@@ -377,18 +392,19 @@ class VRNNGRUGAN(tf.keras.Model):
 
 			# gen can be the generated features or the sequence of latent codes
 
-			for i in range(100):
+			for i in range(97):
 				# outputs and states should be batch_size, feature_size
 				sample, state = self.vrnn.vrnn_cell(inputs, state, inference=False)
-				gen.append(sample[0])
+				gen.append(sample[6])
 				inputs = sample[0] 
 				state = [state]
 			gen = tf.stack(gen, axis=1)
 
 			discrim_fake_output = self.discrim(gen)
+			discrim_fake_output2 = self.discrim(outputs[6])
 			
-			real_embed = self.f(output_data)
-			fake_embed = self.f(gen)
+			# real_embed = self.f(output_data)
+			# fake_embed = self.f(gen)
 
 			q_mu = outputs[2]
 
@@ -413,8 +429,11 @@ class VRNNGRUGAN(tf.keras.Model):
 				nll_gauss(output_data, preds_mu, preds_std)
 			)
 			
-			mislead_output_discrim_loss = tf.reduce_sum(
-			    tf.keras.losses.mean_squared_error(real_embed, fake_embed) 
+			# mislead_output_discrim_loss = tf.reduce_sum(
+			#     tf.keras.losses.mean_squared_error(real_embed, fake_embed) 
+			# )
+			mislead_output_discrim_loss2 = tf.reduce_mean(
+				bce(tf.ones_like(discrim_fake_output2), discrim_fake_output2)
 			)
 
 			# mislead_output_discrim_loss = (tf.reduce_mean(real_embed) - tf.reduce_mean(fake_embed))**2
@@ -424,12 +443,12 @@ class VRNNGRUGAN(tf.keras.Model):
 			#     wasserstein_loss(-tf.ones_like(discrim_fake_output), discrim_fake_output)
 			# )
 			
-			# mislead_output_discrim_loss = tf.reduce_mean(
-			# 	bce(tf.ones_like(discrim_fake_output), discrim_fake_output)
-			# )
+			mislead_output_discrim_loss = tf.reduce_mean(
+				bce(tf.ones_like(discrim_fake_output), discrim_fake_output)
+			)
 			
 			
-			total_loss =  reconstruction_loss + 2.0 * kl_loss + mislead_output_discrim_loss
+			total_loss = reconstruction_loss + kl_loss + self.lambda_gan * (mislead_output_discrim_loss +mislead_output_discrim_loss2)
 			# total_loss =  self.lambda_gan * mislead_output_discrim_loss
 
 		encoder_grads = tape.gradient(total_loss, self.vrnn.trainable_weights)
